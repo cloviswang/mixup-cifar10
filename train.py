@@ -10,7 +10,6 @@ import argparse
 import csv
 import os
 
-import numpy as np
 import torch
 from torch.autograd import Variable
 import torch.backends.cudnn as cudnn
@@ -20,6 +19,9 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import models
+from data_augmentation.ricap_vh_mixup import ricap_vh_mixup
+from data_augmentation.treble_mixup import treble_mixup
+from data_augmentation.vh_mixup import vh_mixup
 from utils import progress_bar
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
@@ -114,27 +116,6 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9,
                       weight_decay=args.decay)
 
 
-def mixup_data(x, y, alpha=1.0, use_cuda=True):
-    '''Returns mixed inputs, pairs of targets, and lambda'''
-    if alpha > 0:
-        lam = np.random.beta(alpha, alpha)
-    else:
-        lam = 1
-
-    batch_size = x.size()[0]
-    if use_cuda:
-        index = torch.randperm(batch_size).cuda()
-    else:
-        index = torch.randperm(batch_size)
-
-    mixed_x = lam * x + (1 - lam) * x[index, :]
-    y_a, y_b = y, y[index]
-    return mixed_x, y_a, y_b, lam
-
-
-def mixup_criterion(criterion, pred, y_a, y_b, lam):
-    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
-
 
 def train(epoch):
     print('\nEpoch: %d' % epoch)
@@ -147,26 +128,35 @@ def train(epoch):
         if use_cuda:
             inputs, targets = inputs.cuda(), targets.cuda()
 
-        inputs, targets_a, targets_b, lam = mixup_data(inputs, targets,
-                                                       args.alpha, use_cuda)
-        inputs, targets_a, targets_b = map(Variable, (inputs,
-                                                      targets_a, targets_b))
+        # inputs, targets_a, targets_b, lam = mixup.data(inputs, targets, args.alpha, use_cuda)
+        # inputs, targets_a, targets_b, targets_c, lam_1, lam_2 = treble_mixup.data(inputs, targets, args.alpha, use_cuda)
+        inputs, targets_a, targets_b, lam_v, lam_h, lam_mixup = ricap_vh_mixup.data(inputs, targets, args.alpha, use_cuda)
+
+        inputs, targets_a, targets_b = map(Variable, (inputs, targets_a, targets_b))
         outputs = net(inputs)
-        loss = mixup_criterion(criterion, outputs, targets_a, targets_b, lam)
+
+        # loss = mixup.criterion(criterion, outputs, targets_a, targets_b, lam)
+        # loss = treble_mixup.criterion(criterion, outputs, targets_a, targets_b, targets_c, lam_1, lam_2)
+        loss = ricap_vh_mixup.criterion(criterion, outputs, targets_a, targets_b, lam_v, lam_h, lam_mixup)
+
         train_loss += loss.item()
         _, predicted = torch.max(outputs.data, 1)
         total += targets.size(0)
-        correct += (lam * predicted.eq(targets_a.data).cpu().sum().float()
-                    + (1 - lam) * predicted.eq(targets_b.data).cpu().sum().float())
+
+        # correct += mixup.correct(predicted, targets_a, targets_b, lam)
+        # correct += treble_mixup.correct(predicted, targets_a, targets_b, targets_c, lam_1, lam_2)
+        correct += ricap_vh_mixup.correct(predicted, targets_a, targets_b, lam_v, lam_h, lam_mixup)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        progress_bar(batch_idx, len(trainloader),
-                     'Loss: %.3f | Reg: %.5f | Acc: %.3f%% (%d/%d)'
-                     % (train_loss / (batch_idx + 1), reg_loss / (batch_idx + 1),
-                        100. * correct / total, correct, total))
+        if batch_idx % 78 == 0:
+            progress_bar(batch_idx, len(trainloader),
+                         'Loss: %.3f | Reg: %.5f | Acc: %.3f%% (%d/%d)'
+                         % (train_loss / (batch_idx + 1), reg_loss / (batch_idx + 1),
+                            100. * correct / total, correct, total))
+
     return (train_loss / batch_idx, reg_loss / batch_idx, 100. * correct / total)
 
 
@@ -188,10 +178,12 @@ def test(epoch):
         total += targets.size(0)
         correct += predicted.eq(targets.data).cpu().sum()
 
-        progress_bar(batch_idx, len(testloader),
-                     'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (test_loss / (batch_idx + 1), 100. * correct / total,
-                        correct, total))
+        if batch_idx % 99 == 0:
+            progress_bar(batch_idx, len(testloader),
+                         'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                         % (test_loss / (batch_idx + 1), 100. * correct / total,
+                            correct, total))
+
     acc = 100. * correct / total
     if epoch == start_epoch + args.epoch - 1 or acc > best_acc:
         checkpoint(acc, epoch)
