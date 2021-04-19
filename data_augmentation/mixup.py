@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torchvision
 from torchvision import transforms as transforms
-
+from torch.autograd import Variable
 import utils
 
 class mixup(object):
@@ -46,3 +46,17 @@ class mixup(object):
         correct = (lam * predicted.eq(targets_a.data).cpu().sum().float() +
                    (1 - lam) * predicted.eq(targets_b.data).cpu().sum().float())
         return correct
+
+    @staticmethod
+    def train(inputs, targets, args, use_cuda, net, criterion, train_loss, total, correct):
+        inputs, targets_a, targets_b, lam = mixup.data(inputs, targets, args.alpha, use_cuda)
+        inputs, targets_a, targets_b = map(Variable, (inputs, targets_a, targets_b))
+        outputs = net(inputs)
+        loss = mixup.criterion(criterion, outputs, targets_a, targets_b, lam)
+
+        train_loss += loss.item()
+        _, predicted = torch.max(outputs.data, 1)
+        total += targets.size(0)
+
+        correct += mixup.correct(predicted, targets_a, targets_b, lam)
+        return train_loss, correct, total, loss
