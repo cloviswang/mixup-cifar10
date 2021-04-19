@@ -13,6 +13,12 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
+from data_augmentation.cut_vh_mixup import CutVhMixup
+from data_augmentation.mixup import Mixup
+from data_augmentation.ricap import Ricap
+from data_augmentation.treble_mixup import TrebleMixup
+from data_augmentation.vh_mixup import VhMixup
+
 
 def get_mean_and_std(dataset):
     '''Compute the mean and std value of dataset.'''
@@ -136,3 +142,16 @@ def imshow(img):
     npimg = img.cpu().numpy()
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
     plt.show()
+
+
+def choose_aug_method(method):
+    if method == 'mixup':
+        return Mixup
+    elif method == 'ricap':
+        return Ricap
+    elif method == 'treble_mixup':
+        return TrebleMixup
+    elif method == 'vh_mixup':
+        return VhMixup
+    elif method == 'CutVhMixup':
+        return CutVhMixup

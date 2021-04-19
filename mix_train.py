@@ -19,13 +19,10 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import models
-from data_augmentation.cut_vh_mixup import cut_vh_mixup
-from data_augmentation.ricap import ricap
-from data_augmentation.augmix import augmix, AugMixDataset
-from data_augmentation.treble_mixup import treble_mixup
-from data_augmentation.vh_mixup import vh_mixup
-from data_augmentation.mixup import mixup
-from utils import progress_bar
+
+from data_augmentation.augmix import AugMixDataset
+
+from utils import progress_bar, choose_aug_method
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -51,6 +48,11 @@ parser.add_argument('--mixture-width', default=3, type=int,
 parser.add_argument('--mixture-depth', default=-1, type=int,
                     help='Depth of augmentation chains. -1 denotes stochastic depth in [1, 3]')
 parser.add_argument('--aug-severity', default=3, type=int, help='Severity of base augmentation operators')
+parser.add_argument('--aug-method-1', default='mixup', type=str, help='data augmentation method 1')
+parser.add_argument('--aug-method-2', default='ricap', type=str, help='data augmentation method 2')
+parser.add_argument('--turn-epochs', default=25, type=int, help='每x个epoch交换一次数据增强方法')
+parser.add_argument('--augmix', default=False, type=bool, help='是否对训练集做augmix')
+
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available()
@@ -63,31 +65,29 @@ if args.seed != 0:
 
 # Data
 print('==> Preparing data..')
+cifar10_path = 'D:\github\mixup-cifar10\data'
 if args.augment:
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
-        # transforms.ToTensor(),
-        # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
 else:
     transform_train = transforms.Compose([
-        # transforms.ToTensor(),
-        # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
-
-preprocess = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
-
 transform_test = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
-cifar10_path = '/home/miao/datasets/'
-trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False,
-                            transform=transform_train)
-trainset = AugMixDataset(args, trainset, preprocess, True)
+if args.augmix:
+    trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False)
+    trainset = AugMixDataset(args, trainset, transform_train, True)
+else:
+    trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False, transform=transform_train)
+
 trainloader = torch.utils.data.DataLoader(trainset,
                                           batch_size=args.batch_size,
                                           shuffle=True, num_workers=0)
@@ -141,41 +141,12 @@ def train(epoch):
         if use_cuda:
             inputs, targets = inputs.cuda(), targets.cuda()
 
-        if (-1 < epoch < 50) or (99 < epoch < 125) or (149 < epoch < 175):
-            inputs, targets_a, targets_b, lam = mixup.data(inputs, targets, args.alpha, use_cuda)
-            inputs, targets_a, targets_b = map(Variable, (inputs, targets_a, targets_b))
-            outputs = net(inputs)
-            loss = mixup.criterion(criterion, outputs, targets_a, targets_b, lam)
+        if int(epoch / args.turn_epochs) % 2 == 0:
+            train_loss, correct, total, loss = choose_aug_method(args.aug_method_1). \
+                train(inputs, targets, args, use_cuda, net, criterion, train_loss, total, correct)
         else:
-            inputs, targets_a, targets_b, targets_c, targets_d, lam_1, lam_2 = ricap.data(inputs, targets, args.alpha,
-                                                                                          use_cuda)
-            inputs, targets_a, targets_b, targets_c, targets_d = map(Variable, (inputs, targets_a, targets_b,
-                                                                                targets_c, targets_d))
-            outputs = net(inputs)
-            loss = ricap.criterion(criterion, outputs, targets_a, targets_b, targets_c, targets_d, lam_1, lam_2)
-
-        # inputs, targets_a, targets_b, lam = mixup.data(inputs, targets, args.alpha, use_cuda)
-        # inputs, targets_a, targets_b, targets_c, lam_1, lam_2 = treble_mixup.data(inputs, targets, args.alpha, use_cuda)
-        # inputs, targets_a, targets_b, lam_v, lam_h, lam_mixup = vh_mixup.data(inputs, targets, args.alpha, use_cuda)
-        # inputs, targets_a, targets_b, targets_c, targets_d, lam_1, lam_2 = ricap.data(inputs, targets, args.alpha, use_cuda)
-
-        # loss = mixup.criterion(criterion, outputs, targets_a, targets_b, lam)
-        # loss = treble_mixup.criterion(criterion, outputs, targets_a, targets_b, targets_c, lam_1, lam_2)
-        # loss = vh_mixup.criterion(criterion, outputs, targets_a, targets_b, lam_v, lam_h, lam_mixup)
-        # loss = ricap.criterion(criterion, outputs, targets_a, targets_b, targets_c, targets_d, lam_1, lam_2)
-
-        train_loss += loss.item()
-        _, predicted = torch.max(outputs.data, 1)
-        total += targets.size(0)
-
-        if (-1 < epoch < 50) or (99 < epoch < 125) or (149 < epoch < 175):
-            correct += mixup.correct(predicted, targets_a, targets_b, lam)
-        else:
-            correct += ricap.correct(predicted, targets_a, targets_b, targets_c, targets_d, lam_1, lam_2)
-        # correct += mixup.correct(predicted, targets_a, targets_b, lam)
-        # correct += treble_mixup.correct(predicted, targets_a, targets_b, targets_c, lam_1, lam_2)
-        # correct += vh_mixup.correct(predicted, targets_a, targets_b, lam_v, lam_h, lam_mixup)
-        # correct += ricap.correct(predicted, targets_a, targets_b, targets_c, targets_d, lam_1, lam_2)
+            train_loss, correct, total, loss = choose_aug_method(args.aug_method_2). \
+                train(inputs, targets, args, use_cuda, net, criterion, train_loss, total, correct)
 
         optimizer.zero_grad()
         loss.backward()

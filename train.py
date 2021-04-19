@@ -19,13 +19,10 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import models
-from data_augmentation.cut_vh_mixup import cut_vh_mixup
-from data_augmentation.mixup import mixup
-from data_augmentation.ricap import ricap
-from data_augmentation.augmix import augmix
-from data_augmentation.treble_mixup import treble_mixup
-from data_augmentation.vh_mixup import vh_mixup
-from utils import progress_bar
+
+from data_augmentation.augmix import AugMixDataset
+
+from utils import progress_bar, choose_aug_method
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -43,7 +40,19 @@ parser.add_argument('--no-augment', dest='augment', action='store_false',
 parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
 parser.add_argument('--alpha', default=1., type=float,
                     help='mixup interpolation coefficient (default: 1)')
-parser.add_argument('--aug-method', default='mixup', type=str, help='data augmentation method')
+parser.add_argument('--no-jsd', '-nj', action='store_true', help='Turn off JSD consistency loss.')
+parser.add_argument('--all-ops', '-all', action='store_true',
+                    help='Turn on all operations (+brightness,contrast,color,sharpness).')
+parser.add_argument('--mixture-width', default=3, type=int,
+                    help='Number of augmentation chains to mix per augmented example')
+parser.add_argument('--mixture-depth', default=-1, type=int,
+                    help='Depth of augmentation chains. -1 denotes stochastic depth in [1, 3]')
+parser.add_argument('--aug-severity', default=3, type=int, help='Severity of base augmentation operators')
+parser.add_argument('--aug-method-1', default='mixup', type=str, help='data augmentation method 1')
+parser.add_argument('--aug-method-2', default='ricap', type=str, help='data augmentation method 2')
+parser.add_argument('--turn-epochs', default=25, type=int, help='每x个epoch交换一次数据增强方法')
+parser.add_argument('--augmix', default=False, type=bool, help='是否对训练集做augmix')
+
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available()
@@ -56,28 +65,29 @@ if args.seed != 0:
 
 # Data
 print('==> Preparing data..')
+cifar10_path = 'D:\github\mixup-cifar10\data'
 if args.augment:
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
 else:
     transform_train = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
-
 transform_test = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
-cifar10_path = 'D:\github\mixup-cifar10\data'
-trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False,
-                            transform=transform_train)
+if args.augmix:
+    trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False)
+    trainset = AugMixDataset(args, trainset, transform_train, True)
+else:
+    trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False, transform=transform_train)
+
 trainloader = torch.utils.data.DataLoader(trainset,
                                           batch_size=args.batch_size,
                                           shuffle=True, num_workers=0)
@@ -131,7 +141,12 @@ def train(epoch):
         if use_cuda:
             inputs, targets = inputs.cuda(), targets.cuda()
 
-        train_loss, correct, total, loss = mixup.train(inputs, targets, args, use_cuda, net, criterion, train_loss, total, correct)
+        if int(epoch / args.turn_epochs) % 2 == 0:
+            train_loss, correct, total, loss = choose_aug_method(args.aug_method_1). \
+                train(inputs, targets, args, use_cuda, net, criterion, train_loss, total, correct)
+        else:
+            train_loss, correct, total, loss = choose_aug_method(args.aug_method_2). \
+                train(inputs, targets, args, use_cuda, net, criterion, train_loss, total, correct)
 
         optimizer.zero_grad()
         loss.backward()

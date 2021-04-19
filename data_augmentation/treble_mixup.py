@@ -3,9 +3,9 @@ import torch
 import torchvision
 from torchvision import transforms as transforms
 from torch.autograd import Variable
-import utils
 
-class treble_mixup(object):
+
+class TrebleMixup(object):
     @staticmethod
     def data(x, y, alpha=1.0, use_cuda=True):
         """
@@ -58,14 +58,14 @@ class treble_mixup(object):
 
     @staticmethod
     def train(inputs, targets, args, use_cuda, net, criterion, train_loss, total, correct):
-        inputs, targets_a, targets_b, targets_c, lam_1, lam_2 = treble_mixup.data(inputs, targets, args.alpha, use_cuda)
+        inputs, targets_a, targets_b, targets_c, lam_1, lam_2 = TrebleMixup.data(inputs, targets, args.alpha, use_cuda)
         inputs, targets_a, targets_b = map(Variable, (inputs, targets_a, targets_b))
         outputs = net(inputs)
-        loss = treble_mixup.criterion(criterion, outputs, targets_a, targets_b, targets_c, lam_1, lam_2)
+        loss = TrebleMixup.criterion(criterion, outputs, targets_a, targets_b, targets_c, lam_1, lam_2)
 
         train_loss += loss.item()
         _, predicted = torch.max(outputs.data, 1)
         total += targets.size(0)
 
-        correct += treble_mixup.correct(predicted, targets_a, targets_b, targets_c, lam_1, lam_2)
+        correct += TrebleMixup.correct(predicted, targets_a, targets_b, targets_c, lam_1, lam_2)
         return train_loss, correct, total, loss

@@ -5,10 +5,9 @@ import torch
 import torchvision
 from torchvision import transforms as transforms
 from torch.autograd import Variable
-import utils
 
 
-class cut_vh_mixup(object):
+class CutVhMixup(object):
     @staticmethod
     def data(x, y, alpha=1.0, use_cuda=True):
         """Returns mixed inputs, pairs of targets, and lambda"""
@@ -88,14 +87,14 @@ class cut_vh_mixup(object):
 
     @staticmethod
     def train(inputs, targets, args, use_cuda, net, criterion, train_loss, total, correct):
-        inputs, targets_a, targets_b, lam_v, lam_h, lam_mixup = cut_vh_mixup.data(inputs, targets, args.alpha, use_cuda)
+        inputs, targets_a, targets_b, lam_v, lam_h, lam_mixup = CutVhMixup.data(inputs, targets, args.alpha, use_cuda)
         inputs, targets_a, targets_b = map(Variable, (inputs, targets_a, targets_b))
         outputs = net(inputs)
-        loss = cut_vh_mixup.criterion(criterion, outputs, targets_a, targets_b, lam_v, lam_h, lam_mixup)
+        loss = CutVhMixup.criterion(criterion, outputs, targets_a, targets_b, lam_v, lam_h, lam_mixup)
 
         train_loss += loss.item()
         _, predicted = torch.max(outputs.data, 1)
         total += targets.size(0)
 
-        correct += cut_vh_mixup.correct(predicted, targets_a, targets_b, lam_v, lam_h, lam_mixup)
+        correct += CutVhMixup.correct(predicted, targets_a, targets_b, lam_v, lam_h, lam_mixup)
         return train_loss, correct, total, loss
