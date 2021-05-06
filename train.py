@@ -19,6 +19,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import models
+from data_augmentation.augmentations import augmentations_all
 
 from data_augmentation.augmix import AugMixDataset
 
@@ -52,9 +53,13 @@ parser.add_argument('--aug-method-1', default='mixup', type=str, help='data augm
 parser.add_argument('--aug-method-2', default='ricap', type=str, help='data augmentation method 2')
 parser.add_argument('--turn-epochs', default=25, type=int, help='每x个epoch交换一次数据增强方法')
 parser.add_argument('--augmix', default=False, type=bool, help='是否对训练集做augmix')
+parser.add_argument('--dataset', default='CIFAR10', type=str, help='dataset(CIFAR10 or CIFAR100)')
 
 args = parser.parse_args()
-
+if args.dataset == 'CIFAR10':
+    num_classes = 10
+elif args.dataset == 'CIFAR100':
+    num_classes = 100
 use_cuda = torch.cuda.is_available()
 
 best_acc = 0  # best test accuracy
@@ -82,18 +87,31 @@ transform_test = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
+preprocess = transforms.Compose([
+    augmentations_all,
+    transforms.ToTensor(),
+    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+])
 if args.augmix:
-    trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False)
-    trainset = AugMixDataset(args, trainset, transform_train, True)
+    if args.dataset == 'CIFAR10':
+        trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False)
+    elif args.dataset == 'CIFAR100':
+        trainset = datasets.CIFAR100(root=cifar10_path, train=True, download=False)
+    trainset = AugMixDataset(args, trainset, preprocess, True)
 else:
-    trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False, transform=transform_train)
+    if args.dataset == 'CIFAR10':
+        trainset = datasets.CIFAR10(root=cifar10_path, train=True, download=False, transform=transform_train)
+    elif args.dataset == 'CIFAR100':
+        trainset = datasets.CIFAR100(root=cifar10_path, train=True, download=False, transform=transform_train)
 
 trainloader = torch.utils.data.DataLoader(trainset,
                                           batch_size=args.batch_size,
                                           shuffle=True, num_workers=0)
+if args.dataset == 'CIFAR10':
+    testset = datasets.CIFAR10(root=cifar10_path, train=False, download=False, transform=transform_test)
+elif args.dataset == 'CIFAR100':
+    testset = datasets.CIFAR100(root=cifar10_path, train=False, download=False, transform=transform_test)
 
-testset = datasets.CIFAR10(root=cifar10_path, train=False, download=False,
-                           transform=transform_test)
 testloader = torch.utils.data.DataLoader(testset, batch_size=100,
                                          shuffle=False, num_workers=0)
 
@@ -111,12 +129,15 @@ if args.resume:
     torch.set_rng_state(rng_state)
 else:
     print('==> Building model..')
-    net = models.__dict__[args.model]()
+    net = models.__dict__[args.model](num_classes)
 
 if not os.path.isdir('results'):
     os.mkdir('results')
-logname = ('results/log_' + net.__class__.__name__ + '_' + args.name + '_'
-           + str(args.seed) + '.csv')
+logname = f'results/log_{net.__class__.__name__}_{args.name}_{args.dataset}_'
+if args.augmix:
+    logname += "augmix_"
+logname += f"({args.aug_method_1}+{args.aug_method_2})_" + str(args.turn_epochs)
+logname += '.csv'
 
 if use_cuda:
     net.cuda()
