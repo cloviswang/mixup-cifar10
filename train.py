@@ -206,7 +206,7 @@ def test(epoch):
                          % (test_loss / (batch_idx + 1), 100. * float(correct) / float(total),
                             correct, total))
 
-    acc = 100. * correct / total
+    acc = 100. * float(correct) / float(total)
     if epoch == start_epoch + args.epoch - 1 or acc > best_acc:
         checkpoint(acc, epoch)
     if acc > best_acc:
@@ -241,7 +241,7 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 if not os.path.exists(logname):
-    with open(logname, 'w') as logfile:
+    with open(logname, 'a') as logfile:
         logwriter = csv.writer(logfile, delimiter=',')
         logwriter.writerow(['epoch', 'train loss', 'reg loss', 'train acc',
                             'test loss', 'test acc'])
